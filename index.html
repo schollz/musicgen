@@ -1,0 +1,71 @@
+<html>
+
+<head>
+</head>
+
+<body>
+    <script src="Tone.js"></script>
+    <script>
+    var masterOffset = 0;
+
+    function NewChord(notePitches, duration, startPosition, loopEvery) {
+        var notes = [];
+        for (var i = 0; i < notePitches.length; i++) {
+            notes.push(NewNote(notePitches[i], duration, startPosition, loopEvery));
+        }
+        return notes;
+    }
+
+    function NewNote(notePitch, duration, startPosition, loopEvery) {
+        var note = new Tone.Event(function(time, pitch) {
+            synth.triggerAttack([pitch], time);
+            console.log(pitch + "on", time);
+            var noteend = new Tone.Event(function(time, pitch) {
+                console.log(pitch + "off", time)
+                synth.triggerRelease([pitch], time)
+            }, pitch);
+            noteend.set({
+                "loop": false
+            })
+            noteend.start(time + Tone.Time(duration).toSeconds() - masterOffset);
+        }, notePitch);
+        note.set({
+            "loop": true,
+            "loopEnd": loopEvery,
+            "humanize": false,
+            "probability": 1,
+        });
+        note.start(startPosition);
+        return note;
+    }
+
+    //create a looped note event every half-note
+    var chord1 = NewChord(["C4", "E4", "G4"], "2n.", 0, "2m");
+    var chord2 = NewChord(["B4", "E4", "G4"], "2n.", "1m", "2m");
+
+    var note1 = NewNote("C5", "2n", 0, "1m");
+    var note2 = NewNote("B4", "2n", "2n", "1m");
+
+    var synth = new Tone.PolySynth(6, Tone.Synth, {
+        oscillator: {
+            type: "sine"
+        },
+    }).set({
+        "filter": {
+            "type": "highpass"
+        },
+        "envelope": {
+            "attack": 0.6,
+            "sustain": 0.6,
+            "decay": 1,
+            "release": 1,
+        },
+    }).toMaster();
+
+    Tone.Transport.bpm.value = 60;
+    masterOffset = Tone.now();
+    Tone.Transport.start();
+    </script>
+</body>
+
+</html>
