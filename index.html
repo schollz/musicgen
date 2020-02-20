@@ -51,18 +51,11 @@
                     <option>X</option>
                 </select>
             </p>
-            <p align="center" class="text">to</p>
-            <p align="center">
-                <select id="controllee">
-                    <option>Y</option>
-                </select>
-            </p>
         </div>
     </main>
     <script src="Tone.js"></script>
     <script>
     var midi1 = null;
-    var midi2 = null;
     var outputMidi = null;
     var addOption = function(dropdownid, text) {
         var optn = document.createElement("OPTION");
@@ -70,31 +63,45 @@
         optn.value = text;
         document.getElementById(dropdownid).options.add(optn);
     }
-    var checkOption = function(e) {
-        console.log(e);
-        if (e.target.id == "controller")
-            midi1 = document.getElementById("controller").value;
-        if (e.target.id == "controllee")
-            midi2 = document.getElementById("controllee").value;
-        if (midi1 == midi2) {
-            alert("cannot be the same")
-            return;
-        }
-        if (midi1 != null && midi2 != null) {
+    var startup = function() {
+        console.log(midi1);
+        if (midi1 != null) {
             console.log("setting up")
             var inputs = midiAccess.inputs.values();
             for (var input = inputs.next(); input && !input.done; input = inputs.next()) {
-                if (input.value.name == midi1)
+                if (input.value.name == midi1) {
+                    console.log(input.value.name)
                     input.value.onmidimessage = MIDIMessageEventHandler;
+                }
             }
             var outputs = midiAccess.outputs.values();
             for (var output = outputs.next(); output && !output.done; output = outputs.next()) {
                 console.log(output);
-                if (midi2 == output.value.name)
+                if (midi1 == output.value.name) {
+                    console.log(midi1)
                     outputMidi = midiAccess.outputs.get(output.value.id);
+                    // synth.dispose();
+                    // var midiClock = new Tone.Event(function(time, pitch) {
+                    //     if (outputMidi == null) {
+                    //         return;
+                    //     }
+                    //     outputMidi.send([248]);
+                    // }, "C4");
+                    // midiClock.set({
+                    //     "loop": 480,
+                    //     "loopEnd": Tone.Time("4n").toSeconds() / 24,
+                    // })
+                    // midiClock.start(Tone.now());
+                }
             }
             document.getElementById("connected").innerText = "connected";
         }
+    }
+    var checkOption = function(e) {
+        console.log(e);
+        if (e.target.id == "controller")
+            midi1 = document.getElementById("controller").value;
+        startup();
     }
     var midiAccess = null;
     window.addEventListener('load', function() {
@@ -106,7 +113,12 @@
             return;
         }
         document.getElementsByTagName('select')[0].onchange = checkOption
-        document.getElementsByTagName('select')[1].onchange = checkOption
+
+        setTimeout(function() {
+            midi1 = "OP-1 Midi Device MIDI 1";
+            startup();
+        }, 700);
+
     });
 
     function onMIDIInit(midi) {
@@ -121,7 +133,6 @@
         var outputs = midiAccess.outputs.values();
         for (var output = outputs.next(); output && !output.done; output = outputs.next()) {
             console.log(output);
-            addOption("controllee", output.value.name)
         }
         if (!haveAtLeastOneDevice) {
             document.getElementById("connected").innerText = "No MIDI input devices present.";
@@ -134,18 +145,32 @@
         document.getElementById("connectioninfo").style.display = "none";
     }
 
+    var currentNotes = {};
+
     function MIDIMessageEventHandler(event) {
         // Mask off the lower nibble (MIDI channel, which we don't care about)
         switch (event.data[0] & 0xf0) {
             case 0x90:
                 if (event.data[2] != 0) { // if velocity != 0, this is a note-on message
-                    noteOn(event.data);
+                    console.log(event.data);
+                    currentNotes[event.data[1]] = Tone.now();
+                    // noteOn(event.data);
                     return;
                 }
                 // if velocity == 0, fall thru: it's a note-off.  MIDI's weird, y'all.
             case 0x80:
-                noteOff(event.data);
-                return;
+                console.log(event.data);
+                var t2 = Tone.now();
+                if (event.data[1] in currentNotes) {
+                    var t1 = currentNotes[event.data[1]];
+                    delete(currentNotes[event.data[1]]);
+                    var noteString = Tone.Midi(event.data[1]).toNote();
+                    var t1q = Tone.Time(Tone.Time(t1).quantize("8n") + masterOffset);
+                    var t2q = Tone.Time(Tone.Time(t2).quantize("8n") + masterOffset);
+                    console.log(noteString, t1q, t2q);
+                    var note2 = NewNote(noteString, t2q - t1q, t1q, "4m", true);
+                }
+                // noteOff(event.data);                return;
         }
     }
 
@@ -170,54 +195,103 @@
         return notes;
     }
 
-    function NewNote(notePitch, duration, startPosition, loopEvery) {
+    function NewNote(notePitch, duration, startPosition, loopEvery, doLoop) {
         var note = new Tone.Event(function(time, pitch) {
-            synth.triggerAttack([pitch], time);
+            if (outputMidi != null) {
+                outputMidi.send([144, Tone.Midi(pitch).toMidi(), 50]);
+            } else {
+                synth.triggerAttack([pitch], time);
+            }
+
             console.log(pitch + "on", time);
             var noteend = new Tone.Event(function(time, pitch) {
                 console.log(pitch + "off", time)
-                synth.triggerRelease([pitch], time)
+                if (outputMidi != null) {
+                    outputMidi.send([128, Tone.Midi(pitch).toMidi(), 60]);
+                } else {
+                    synth.triggerRelease([pitch], time)
+                }
             }, pitch);
             noteend.set({
                 "loop": false
             })
 
             // subtract off a 32nd note so that other notes have time to use the note
-            noteend.start(time + Tone.Time(duration).toSeconds() - masterOffset - Tone.Time("16n").toSeconds());
+            noteend.start(time + Tone.Time(duration).toSeconds() - masterOffset);
         }, notePitch);
         note.set({
-            "loop": true,
+            "loop": doLoop,
             "loopEnd": loopEvery,
             "humanize": true,
-            "probability": 0.8,
+            "probability": 0.7,
         });
         note.start(startPosition);
         return note;
     }
 
 
-    var chord1 = NewChord(["C4", "E4", "G4"], "1n", 0, "2m");
-    var chord2 = NewChord(["B4", "E4", "G4"], "1n", "1m", "2m");
+    var velocityMain = 60;
+    velocityDirection = 0;
+    var velocityDrift = new Tone.Event(function(time, pitch) {
+        if (Math.random() < 0.5) {
+            velocityDirection = velocityDirection - 1;
+        } else {
+            velocityDirection = velocityDirection + 1;
+        }
+        velocityMain = velocityMain + velocityDirection;
+        console.log(velocityMain, velocityDirection);
+        if (velocityMain > 126) {
+            velocityMain = 126;
+            velocityDirection = 0;
+        } else if (velocityMain < 1) {
+            velocityMain = 1;
+            velocityDirection = 0;
+        }
+    }, "C4")
+    velocityDrift.set({
+        "loop": true,
+        "loopEnd": "16n",
+        "humanize": false,
+    })
+    velocityDrift.start(0);
 
-    var note1 = NewNote("C5", "2n", 0, "2m");
-    var note2 = NewNote("B4", "2n", "2n", "2m");
-    var note2 = NewNote("A4", "2n", "1m", "2m");
+    /*
+ NewNote("C4", "2n.", 0, "2m",true);
+NewNote("D4", "2n.", 0, "2m",true);
+NewNote("E4", "2n.", 0, "2m",true);
+NewNote("G4", "2n.", 0, "2m",true);
+NewNote("C5", "2n.", 0, "2m",true);
+NewNote("D5", "2n.", 0, "2m",true);
+NewNote("E5", "2n.", 0, "2m",true);
+NewNote("G5", "2n.", 0, "2m",true);
+NewNote("B4", "2n.", "1m", "2m",true);
+NewNote("D4", "2n.", "1m", "2m",true);
+NewNote("E4", "2n.", "1m", "2m",true);
+NewNote("G4", "2n.", "1m", "2m",true);
+    */
+    // var chord1 = NewChord(["C4", "D4", "E4", "G4"], "2n.", 0, "2m", true);
+    // var chord2 = NewChord(["B4", "D4", "E4", "G4"], "2n.", "1m", "2m", true);    
+    // var note2 = NewNote("B4", "8n.", 0, "4n",true);
+    // var note1 = NewNote("C5", "4n", 0, "2n");
+    // var note2 = NewNote("B4", "2n", "2n", "2m");
+    var note2 = NewNote("A4", "2n", "4m", 1, false);
 
     var synth = new Tone.PolySynth(6, Tone.Synth, {
         oscillator: {
-            type: "sine"
+            type: "square"
         },
     }).set({
         "filter": {
             "type": "highpass"
         },
-        "envelope": {
-            "attack": 0.6,
-            "sustain": 0.6,
-            "decay": 1,
-            "release": 1,
-        },
-    }).toMaster();
+        // "envelope": {
+        //     "attack": 0.9,
+        //     "sustain": 0.6,
+        //     "decay": 1,
+        //     "release": 0.5,
+        // },
+    })
+    synth.toMaster();
 
     Tone.Transport.bpm.value = 60;
     masterOffset = Tone.now();
