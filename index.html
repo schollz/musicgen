@@ -146,6 +146,7 @@
     }
 
     var currentNotes = {};
+    var notesPlaying = [];
 
     function MIDIMessageEventHandler(event) {
         // Mask off the lower nibble (MIDI channel, which we don't care about)
@@ -156,8 +157,10 @@
                     currentNotes[event.data[1]] = Tone.now();
                     // noteOn(event.data);
                     return;
+                } else {
+                    // if velocity == 0, fall thru: it's a note-off.  MIDI's weird, y'all.
+                    console.log("FALL THRU")
                 }
-                // if velocity == 0, fall thru: it's a note-off.  MIDI's weird, y'all.
             case 0x80:
                 console.log(event.data);
                 var t2 = Tone.now();
@@ -165,10 +168,13 @@
                     var t1 = currentNotes[event.data[1]];
                     delete(currentNotes[event.data[1]]);
                     var noteString = Tone.Midi(event.data[1]).toNote();
-                    var t1q = Tone.Time(Tone.Time(t1).quantize("8n") + masterOffset);
-                    var t2q = Tone.Time(Tone.Time(t2).quantize("8n") + masterOffset);
+                    var t1q = Tone.Time(t1).quantize("16n");
+                    var t2q = Tone.Time(t2).quantize("16n") + masterOffset;
+                    if (t2q == t1q) {
+                        t2q = t2q + Tone.Time(Tone.Time("16n")).toSeconds();
+                    }
                     console.log(noteString, t1q, t2q);
-                    var note2 = NewNote(noteString, t2q - t1q, t1q, "4m", true);
+                    notesPlaying.push(NewNote(noteString, Tone.Time(t2q - t1q), Tone.Time(t1q), "4m", true));
                 }
                 // noteOff(event.data);                return;
         }
@@ -222,8 +228,8 @@
         note.set({
             "loop": doLoop,
             "loopEnd": loopEvery,
-            "humanize": true,
-            "probability": 0.7,
+            "humanize": false,
+            "probability": 1,
         });
         note.start(startPosition);
         return note;
@@ -239,7 +245,7 @@
             velocityDirection = velocityDirection + 1;
         }
         velocityMain = velocityMain + velocityDirection;
-        console.log(velocityMain, velocityDirection);
+        // console.log(velocityMain, velocityDirection);       
         if (velocityMain > 126) {
             velocityMain = 126;
             velocityDirection = 0;
@@ -276,6 +282,7 @@ NewNote("G4", "2n.", "1m", "2m",true);
     // var note2 = NewNote("B4", "2n", "2n", "2m");
     var note2 = NewNote("A4", "2n", "4m", 1, false);
 
+
     var synth = new Tone.PolySynth(6, Tone.Synth, {
         oscillator: {
             type: "square"
@@ -293,7 +300,7 @@ NewNote("G4", "2n.", "1m", "2m",true);
     })
     synth.toMaster();
 
-    Tone.Transport.bpm.value = 60;
+    Tone.Transport.bpm.value = 120;
     masterOffset = Tone.now();
     Tone.Transport.start();
     </script>
